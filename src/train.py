@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 import pytz
 import argparse
 import pprint as pp
@@ -83,12 +85,12 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params
-    parser.add_argument('--epochs', type=int, default=800, help="total training epochs")
+    parser.add_argument('--epochs', type=int, default=500, help="total training epochs")
     parser.add_argument('--accumulation_steps', type=int, default=1)
 
     # batch and epoch
     parser.add_argument('--train_episodes', type=int, default=5000, help="the num. of training instances per epoch")
-    parser.add_argument('--val_episodes', type=int, default=5000)
+    parser.add_argument('--val_episodes', type=int, default=100)
     parser.add_argument('--train_batch_size', type=int, default=128)
     parser.add_argument('--validation_batch_size', type=int, default=128)
     parser.add_argument('--problem_size', type=int, default=50)
@@ -123,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument('--occ_gpu', type=float, default=0., help="occupy (X)% GPU memory in advance, please use sparingly.")
     parser.add_argument('--tb_logger', type=bool, default=True)
     parser.add_argument('--wandb_logger', type=bool, default=True)
+    parser.add_argument('--exp_name', type=str, default="baseline", help="experiment tag, e.g. 'baseline', 'ablation_no_sl'")
 
     args = parser.parse_args()
     seed_everything(args.seed)
@@ -130,15 +133,25 @@ if __name__ == "__main__":
     if args.val_dataset is None:
         args.val_dataset = [f"{args.problem.lower()}{args.problem_size}_{args.hardness}_{args.timewindows}.pkl"]
 
-    # set log
-    run_name = f"_{args.problem}{args.problem_size}_{args.hardness}"
+    # set log and naming
+    run_name = f"_{args.problem}{args.problem_size}_TW{args.timewindows}_{args.hardness}"
     if args.timeout_reward:
         run_name += "_LM"
+    if args.use_sto:
+        run_name += "_STO"
+    if args.sl_loss != "BCEWithLogitsLoss":
+        run_name += f"_{args.sl_loss}"
+
+    run_name += f"_lr{args.lr}_bs{args.train_batch_size}_valsize{args.val_episodes}"
+
+    if args.exp_name:
+        run_name += f"_{args.exp_name}"
+
     process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
+    name = process_start_time.strftime("%Y%m%d_%H%M%S") + run_name
     if args.resume_path is not None:
         args.log_path = args.resume_path
     else:
-        name = process_start_time.strftime("%Y%m%d_%H%M%S") + run_name
         args.log_path = os.path.join(args.log_dir, name)
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
@@ -157,7 +170,9 @@ if __name__ == "__main__":
             args.gpu_id = int(args.gpu_id)
             args.device = torch.device('cuda', args.gpu_id)
             torch.cuda.set_device(args.gpu_id)
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.set_default_tensor_type('torch.cuda.FloatTensor') # Use Nvidia
+        # torch.set_default_dtype(torch.float32) # use AMD
+
     else:
         args.device = torch.device('cpu') # cpu
     print(">> USE_CUDA: {}, CUDA_DEVICE_NUM: {}".format(not args.no_cuda, args.gpu_id))
@@ -167,7 +182,7 @@ if __name__ == "__main__":
 
     # TODO: update logger methods to output csv files for training loss and val rewards
     if args.wandb_logger:
-        wandb.init(project="DeCoST", name=name,
+        wandb.init(project="DeCoST", name=name, id=name.replace(".", "_"),
                    config={**env_params, **model_params, **optimizer_params, **trainer_params})
     create_logger(filename="run_log", log_path=args.log_path)
     torch.set_printoptions(threshold=1000000)

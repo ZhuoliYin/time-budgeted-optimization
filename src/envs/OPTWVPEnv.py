@@ -7,7 +7,7 @@ from collections import namedtuple
 import pandas as pd
 import gurobipy as gp
 from gurobipy import GRB
-from TOPTWVP_Gurobi_Solver import TOPTWVP_Gurobi_Solver
+from src.TOPTWVP_Gurobi_Solver import TOPTWVP_Gurobi_Solver
 import time
 
 __all__ = ['OPTWVPEnv']

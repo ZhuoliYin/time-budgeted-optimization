@@ -139,10 +139,10 @@ class Trainer:
                 val_episodes, problem_size = self.env_params['val_episodes'], self.env_params['problem_size']
                 if self.env_params['val_dataset'] is not None:
                     paths = self.env_params['val_dataset']
-                    dir = ["../data/{}/".format(self.args.problem)] * len(paths)
+                    dir = ["./data/{}/".format(self.args.problem)] * len(paths)
                     val_envs = [get_env(prob)[0] for prob in val_problems] * len(paths)
                 else:
-                    dir = [os.path.join("../data", prob) for prob in val_problems]
+                    dir = [os.path.join("./data", prob) for prob in val_problems]
                     paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
                     val_envs = [get_env(prob)[0] for prob in val_problems]
                 for i, path in enumerate(paths):
