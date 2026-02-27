@@ -168,7 +168,7 @@ class SINGLEModel(nn.Module):
         return selected, prob, service_time_normed
 
     def get_context(self, state, tw_end):
-        # 这里引入了额外的特征例如现在的时间，考虑可以加入额外的 maxdistance 特征
+        # addition attributes, such as current time. other attr includes maxdistance
         if self.problem in ["CVRP"]:
             attr = state.load[:, :, None]
         elif self.problem in ["VRPB", 'TSPDL']:
@@ -356,6 +356,8 @@ class SINGLE_Decoder(nn.Module):
 
         # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+
+        # v1: add features as scaler
         if self.problem == "CVRP":
             self.Wq_last = nn.Linear(embedding_dim + 1, head_num * qkv_dim, bias=False)
         elif self.problem in ["VRPB", "TOPTWVP", "OPTWVP", "TOPTW",  "OPTW", "TSPTW", "TSPDL"]:
@@ -370,6 +372,9 @@ class SINGLE_Decoder(nn.Module):
         else:
             raise NotImplementedError
 
+        # v2: add features as embedding so the embed_dim does not change
+        # self.Wq_last = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         
@@ -379,6 +384,8 @@ class SINGLE_Decoder(nn.Module):
         self.k = None  # saved key, for multi-head_attention
         self.v = None  # saved value, for multi-head_attention
         self.single_head_key = None  # saved, for single-head_attention
+        #TODO: pass the dim of additional attr  from the args
+        self.attr_proj = nn.Linear(1, embedding_dim, bias=False)
         # self.q1 = None  # saved q1, for multi-head attention
         # self.q2 = None  # saved q2, for multi-head attention
 
@@ -435,8 +442,14 @@ class SINGLE_Decoder(nn.Module):
 
         #  Multi-Head Attention
         #######################################################
-        # information of the last step 
+        # information of the last step
+
+        # v1
         input_cat = torch.cat((encoded_last_node, attr), dim=2)
+
+        # v2
+        # attr_embedded = self.attr_proj(attr)
+        # input_cat = encoded_last_node + attr_embedded  # (batch, pomo, 128)
         # shape = (batch, group, EMBEDDING_DIM+1)
 
         q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)
