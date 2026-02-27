@@ -157,7 +157,9 @@ if __name__ == "__main__":
             args.gpu_id = int(args.gpu_id)
             args.device = torch.device('cuda', args.gpu_id)
             torch.cuda.set_device(args.gpu_id)
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        # torch.set_default_tensor_type('torch.cuda.FloatTensor') # Use Nvidia
+        torch.set_default_dtype(torch.float32) # use AMD
+
     else:
         args.device = torch.device('cpu') # cpu
     print(">> USE_CUDA: {}, CUDA_DEVICE_NUM: {}".format(not args.no_cuda, args.gpu_id))

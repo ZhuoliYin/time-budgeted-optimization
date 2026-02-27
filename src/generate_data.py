@@ -14,7 +14,8 @@ if __name__ == "__main__":
     parser.add_argument('--dir', type=str, default="./data")
     parser.add_argument('--no_cuda', action='store_true', default=True)
     parser.add_argument('--gpu_id', type=int, default=0)
-    parser.add_argument('--timewindows', type=int, default=500)
+    parser.add_argument('--timewindows', type=int, default=100)
+    parser.add_argument('--use_sto', type=int, default=0, help="enable STO stage (1)")
 
     args = parser.parse_args()
     pp.pprint(vars(args))
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     envs = get_env(args.problem)
     env_params = {'problem':args.problem, 'hardness':args.hardness, 
                   'problem_size': args.problem_size, 'pomo_size': args.pomo_size, 
-                  'max_tw_size': args.timewindows}
+                  'max_tw_size': args.timewindows,'device': args.device, 'stage': args.use_sto}
     for env in envs:
         env = env(**env_params)
         if args.problem in ["OPTWVP"]:

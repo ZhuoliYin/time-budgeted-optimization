@@ -141,8 +141,8 @@ class SINGLEModel(nn.Module):
             # shape: (batch, pomo, embedding)
             attr = self.get_context(state, tw_end)
             ninf_mask = state.ninf_mask
-            probs = self.decoder(encoded_last_node, attr, ninf_mask=ninf_mask)
-            service_times_normed = self.servicetime_decoder(encoded_last_node, attr, ninf_mask=ninf_mask)
+            probs = self.decoder(encoded_last_node, attr, ninf_mask=ninf_mask) # routing decoder
+            service_times_normed = self.servicetime_decoder(encoded_last_node, attr, ninf_mask=ninf_mask) # service time decoder
 
             if selected is None:
                 while True:
@@ -425,7 +425,7 @@ class SINGLE_Decoder(nn.Module):
         # load.shape: (batch, 1~4)
         # ninf_mask.shape: (batch, pomo, problem)
 
-        ############# 处理所有节点都被访问过的情况, 令最开始的节点为0
+        ############# if all nodes were visited, force to return to depot (depot = 0)
         if ninf_mask is not None:
             mask_inf = torch.isinf(ninf_mask).all(dim=2)
             batch_indices, group_indices = torch.where(mask_inf)
