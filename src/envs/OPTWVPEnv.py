@@ -7,7 +7,7 @@ from collections import namedtuple
 import pandas as pd
 import gurobipy as gp
 from gurobipy import GRB
-from src.TOPTWVP_Gurobi_Solver import TOPTWVP_Gurobi_Solver
+from TOPTWVP_Gurobi_Solver import TOPTWVP_Gurobi_Solver
 import time
 
 __all__ = ['OPTWVPEnv']
@@ -100,7 +100,6 @@ class OPTWVPEnv:
 
 
     def load_problems(self, batch_size, problems=None, aug_factor=1, normalize=True):
-        # 处理输入问题数据
         if problems is not None:
             node_xy, service_time, tw_start, tw_end, profit, s_tw_start, s_tw_end, max_travel_distance = problems
         else:
@@ -237,6 +236,9 @@ class OPTWVPEnv:
         self.current_time = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
         self.length = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
         self.current_coord = self.node_xy[:, :1, :]  # depot
+
+        self.remaining_time_budget = self.max_travel_distance.squeeze(-1)  # full budget at the beginning
+        self.remaining_node_ratio = torch.ones(self.batch_size, self.pomo_size)  # all nodes are available
 
         self.total_profit = 0
         reward = None
@@ -378,6 +380,10 @@ class OPTWVPEnv:
         finished_mask = self.finished.unsqueeze(-1).expand(-1, -1, self.problem_size)  # shape: (batch, pomo, problem_size)
         self.ninf_mask[finished_mask] = float('-inf')
 
+        self.remaining_time_budget = (self.max_travel_distance - self.current_time - return_to_depot_length) # should be obtained after a new node is generated
+        self.remaining_node_ratio = ((self.ninf_mask == 0).sum(dim=-1).float() / self.problem_size)
+
+
         # =====================================================================
         # UPDATE STEP STATE (passed to the decoder for the next decision)
         # =====================================================================
@@ -390,6 +396,8 @@ class OPTWVPEnv:
         self.step_state.length = self.length
         self.step_state.current_coord = self.current_coord
 
+        self.step_state.remaining_time_budget = self.remaining_time_budget
+        self.step_state.remaining_node_ratio = self.remaining_node_ratio
         # =====================================================================
         # CHECK IF ALL ROUTES ARE DONE AND COMPUTE REWARD
         # =====================================================================

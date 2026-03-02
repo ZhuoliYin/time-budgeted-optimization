@@ -14,8 +14,8 @@ class SINGLEModel(nn.Module):
         self.problem = self.model_params['problem']
 
         self.encoder = SINGLE_Encoder(**model_params)
-        self.decoder = SINGLE_Decoder(**model_params)
-        self.servicetime_decoder = SINGLE_Decoder(**model_params)
+        self.decoder = SINGLE_Decoder(decoder_type='routing', **model_params)
+        self.servicetime_decoder = SINGLE_Decoder(decoder_type='service_time', **model_params)
         self.encoded_nodes = None
 
         # self.device = torch.device('cuda', torch.cuda.current_device()) if 'device' not in model_params.keys() else model_params['device']
@@ -139,6 +139,8 @@ class SINGLEModel(nn.Module):
         else: # Sample from the action distribution
             encoded_last_node = self._get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
+
+            # TODO: embedding more features
             attr = self.get_context(state, tw_end)
             ninf_mask = state.ninf_mask
             probs = self.decoder(encoded_last_node, attr, ninf_mask=ninf_mask) # routing decoder
@@ -169,11 +171,20 @@ class SINGLEModel(nn.Module):
 
     def get_context(self, state, tw_end):
         # addition attributes, such as current time. other attr includes maxdistance
-        if self.problem in ["CVRP"]:
+        if self.problem in ["OPTWVP"]:
+            norm_factor = 10. if self.model_params["tw_normalize"] else 1.
+
+            attr = {
+                'elapsed_time': state.current_time[:, :, None] / norm_factor,
+                'remaining_time': state.remaining_time_budget[:, :, None] / norm_factor,
+                'remaining_node_ratio': state.remaining_node_ratio[:, :, None],
+            }
+
+        elif self.problem in ["CVRP"]:
             attr = state.load[:, :, None]
         elif self.problem in ["VRPB", 'TSPDL']:
             attr = state.load[:, :, None]  # shape: (batch, pomo, 1)
-        elif self.problem in ["TOPTW", "OPTW", "TSPTW", "OPTWVP", "TOPTWVP"]:
+        elif self.problem in ["TOPTW", "OPTW", "TSPTW", "TOPTWVP"]:
             attr = state.current_time[:, :, None]  # shape: (batch, pomo, 1)
             if self.model_params["tw_normalize"]:
                 attr = attr / 10. # tw_end[:, 0][:, None, None]
@@ -346,46 +357,44 @@ class EncoderLayer(nn.Module):
 ########################################
 
 class SINGLE_Decoder(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, decoder_type='routing', **model_params):
         super().__init__()
         self.model_params = model_params
         self.problem = self.model_params['problem']
         embedding_dim = self.model_params['embedding_dim']
         head_num = self.model_params['head_num']
         qkv_dim = self.model_params['qkv_dim']
+        self.decoder_type = decoder_type
 
         # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
 
-        # v1: add features as scaler
-        if self.problem == "CVRP":
-            self.Wq_last = nn.Linear(embedding_dim + 1, head_num * qkv_dim, bias=False)
-        elif self.problem in ["VRPB", "TOPTWVP", "OPTWVP", "TOPTW",  "OPTW", "TSPTW", "TSPDL"]:
-            self.Wq_last = nn.Linear(embedding_dim + 1, head_num * qkv_dim, bias=False)
-        elif self.problem in ["OVRP", "OVRPB", "VRPTW", "VRPBTW", "VRPL", "VRPBL"]:
-            attr_num = 3 if self.model_params["extra_feature"] else 2
-            self.Wq_last = nn.Linear(embedding_dim + attr_num, head_num * qkv_dim, bias=False)
-        elif self.problem in ["VRPLTW", "VRPBLTW", "OVRPL", "OVRPBL", "OVRPTW", "OVRPBTW"]:
-            self.Wq_last = nn.Linear(embedding_dim + 3, head_num * qkv_dim, bias=False)
-        elif self.problem in ["OVRPLTW", "OVRPBLTW"]:
-            self.Wq_last = nn.Linear(embedding_dim + 4, head_num * qkv_dim, bias=False)
-        else:
-            raise NotImplementedError
-
-        # v2: add features as embedding so the embed_dim does not change
-        # self.Wq_last = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-
+        # ==============
+        # SHARED BLOCKS
+        # ==============
+        self.Wq_last = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        
-
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.k = None  # saved key, for multi-head_attention
         self.v = None  # saved value, for multi-head_attention
         self.single_head_key = None  # saved, for single-head_attention
         #TODO: pass the dim of additional attr  from the args
-        self.attr_proj = nn.Linear(1, embedding_dim, bias=False)
+
+        # =================
+        # SHARED EMBEDDING
+        # =================
+        self.remaining_time_budget_embed = nn.Linear(1, embedding_dim, bias=False)
+        self.remaining_node_ratio_embed = nn.Linear(1, embedding_dim, bias=False)
+        self.elapsed_time_embed = nn.Linear(1, embedding_dim, bias=False)
+
+        # ==================
+        # service time head
+        # ==================
+        if self.decoder_type == 'service_time':
+            self.current_node_profit_embed = nn.Linear(1, embedding_dim, bias=False)
+            self.current_node_tw_embed = nn.Linear(1, embedding_dim, bias=False)
         # self.q1 = None  # saved q1, for multi-head attention
         # self.q2 = None  # saved q2, for multi-head attention
 
@@ -444,12 +453,28 @@ class SINGLE_Decoder(nn.Module):
         #######################################################
         # information of the last step
 
-        # v1
-        input_cat = torch.cat((encoded_last_node, attr), dim=2)
+        # attr_embedded = self.elapsed_time_embed(attr)
 
-        # v2
-        # attr_embedded = self.attr_proj(attr)
-        # input_cat = encoded_last_node + attr_embedded  # (batch, pomo, 128)
+        # if self.model_params['exp_name'] == 'ablation_no_elapsed_time':
+        #     input_cat = encoded_last_node
+        # else:
+        #     input_cat = encoded_last_node + attr_embedded  # (batch, pomo, 128)
+
+        input_cat = encoded_last_node
+
+        # if 'remaining_time' in attr:
+        #     input_cat = input_cat + self.remaining_time_budget_embed(attr['remaining_time'])
+        #
+        # if 'remaining_node_ratio' in attr:
+        #     input_cat = input_cat + self.remaining_node_ratio_embed(attr['remaining_node_ratio'])
+
+        # if self.decoder_type == 'service_time':
+        #     if 'current_node_profit' in attr:
+        #         input_cat = input_cat + self.current_node_profit_embed(attr['current_node_profit'])
+        #     if 'current_node_tw_embed' in attr:
+        #         input_cat = input_cat + self.current_node_tw_embed(attr['current_node_tw_embed'])
+
+
         # shape = (batch, group, EMBEDDING_DIM+1)
 
         q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)
@@ -477,7 +502,11 @@ class SINGLE_Decoder(nn.Module):
 
         score_masked = score_clipped + ninf_mask
 
-        probs = F.softmax(score_masked, dim=2)
+        # probs = F.softmax(score_masked, dim=2)
+        if self.decoder_type == 'service_time':
+            probs = torch.sigmoid(score_masked)
+        elif self.decoder_type == 'routing':
+            probs = F.softmax(score_masked, dim=2)
         # shape: (batch, pomo, problem)
         
         ################### debug use ###########################

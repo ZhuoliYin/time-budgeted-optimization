@@ -24,7 +24,7 @@ def args2dict(args):
                     "eval_type": args.eval_type, "problem": args.problem,
                     "tw_normalize": args.tw_normalize, 
                     "decision_boundary": args.decision_boundary, "detach_from_encoder": args.detach_from_encoder,
-                    "use_ninf_mask_in_sl_MHA": args.use_ninf_mask_in_sl_MHA,
+                    "use_ninf_mask_in_sl_MHA": args.use_ninf_mask_in_sl_MHA, "exp_name": args.exp_name,
                     "device": args.device,
                     }
 
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument('--occ_gpu', type=float, default=0., help="occupy (X)% GPU memory in advance, please use sparingly.")
     parser.add_argument('--tb_logger', type=bool, default=True)
     parser.add_argument('--wandb_logger', type=bool, default=True)
-    parser.add_argument('--exp_name', type=str, default="baseline", help="experiment tag, e.g. 'baseline', 'ablation_no_sl'")
+    parser.add_argument('--exp_name', type=str, default="add_remaining_time_node_ratio", help="experiment tag, e.g. 'baseline', 'ablation_no_sl'")
 
     args = parser.parse_args()
     seed_everything(args.seed)
